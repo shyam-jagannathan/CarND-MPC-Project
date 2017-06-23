@@ -91,6 +91,8 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double delta = j[1]["steering_angle"];
+          double acc = j[1]["throttle"];
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -100,6 +102,36 @@ int main() {
           */
           double steer_value;
           double throttle_value;
+          double Lf = 2.67;
+
+          //predict state in 100ms
+          double latency = 0.1;
+          //px = px + v * cos(psi) * latency;
+          //py = py + v * sin(psi) * latency;
+          //psi = psi + v * delta/Lf * latency;
+          //v = v + acc * latency;
+
+          Eigen::VectorXd ptsx_v(ptsx.size());
+          Eigen::VectorXd ptsy_v(ptsy.size());
+
+          for(size_t i = 0; i < ptsx.size(); i++) {
+            ptsx_v[i] = (ptsx[i] - px) * cos(psi) + (ptsy[i] - py) * sin(psi);
+            ptsy_v[i] = (ptsy[i] - py) * cos(psi) - (ptsx[i] - px) * sin(psi);
+          }
+
+          // Fit a polynomial to the above x and y coordinates
+          auto coeffs = polyfit(ptsx_v, ptsy_v, 3);
+
+          double cte = polyeval(coeffs, 0);
+          double epsi = -atan(coeffs[1]);
+
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+
+          auto vars = mpc.Solve(state, coeffs);
+
+          steer_value = -1 * vars[6] / (deg2rad(25) * Lf);
+          throttle_value = vars[7];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -114,12 +146,21 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
+          mpc_x_vals = {-20, -15, -10, -5, 0, 5, 10, 15, 20};
+          mpc_y_vals = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
+
+
+          for(size_t i = 0; i < ptsx_v.size(); i++) {
+            next_x_vals.push_back(ptsx_v[i]);
+            next_y_vals.push_back(ptsy_v[i]);
+          } 
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
@@ -139,7 +180,7 @@ int main() {
           //
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
-          this_thread::sleep_for(chrono::milliseconds(100));
+          this_thread::sleep_for(chrono::milliseconds(0));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
