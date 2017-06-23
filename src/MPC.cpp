@@ -21,6 +21,7 @@ double dt = 0.1;
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
 
+//Try a maximum velocity of 100mph!
 double ref_v = 100;
 
 //Starting offsets to the states and actuator values
@@ -49,19 +50,23 @@ class FG_eval {
 
     //Cost should comprehend, cross track error (cte), orientation error (epsi) and maintain a constant velocity
     for(t = 0; t < N; t++) {
+      //The cross track error and orientation error are heavily penalized by a factor of 2000
       fg[0] += 2000 * CppAD::pow(vars[cte_start + t], 2);
       fg[0] += 2000 * CppAD::pow(vars[epsi_start + t], 2);
+      //Make sure you subtract ref_v here otherwise vehicle will just stop after reaching min cte and epsi
       fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
 
     //Also cost should take into account actuator values, steering angle (delta) and acceleration (a)
     for(t = 0; t < (N-1); t++) {
+      //Marginally scale steering angle and accelerator values
       fg[0] += 5*CppAD::pow(vars[delta_start + t], 2);
       fg[0] += 5*CppAD::pow(vars[a_start + t], 2);
     }
 
     //Cost should also take into effect the rate of change in steering angle and acceleration, this checks sudden increment/decrement in actuator values
     for(t = 0; t < (N-2); t++) {
+      //Penalize steering angle change more than acceleration. This will ensure smooth lane transition
       fg[0] += 200 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
       fg[0] += 10 * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
@@ -96,6 +101,7 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
+      //Line equation ifi 3rd order as opposed to 1st order in the quiz
       AD<double> f0 = coeffs[0] + (coeffs[1] * x0) + (coeffs[2] * x0 * x0) + (coeffs[3] * x0 * x0 * x0);
       AD<double> psides0 = CppAD::atan(coeffs[1] + (2 * coeffs[2] * x0) + (3 * coeffs[3] * x0 * x0));
 
@@ -168,6 +174,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // The upper and lower limits of delta are set to -25 and 25
   // degrees (values in radians).
   // NOTE: Feel free to change this to something else.
+
+  //Scale the limits by Lf but remember to normalize before using
   for (i = delta_start; i < a_start; i++) {
     vars_lowerbound[i] = -0.436332 * Lf;
     vars_upperbound[i] = 0.436332 * Lf;
@@ -244,8 +252,15 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   //
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
-  return {solution.x[x_start + 1],   solution.x[y_start + 1],
-          solution.x[psi_start + 1], solution.x[v_start + 1],
-          solution.x[cte_start + 1], solution.x[epsi_start + 1],
-          solution.x[delta_start],   solution.x[a_start]};
+  vector<double> result;
+
+  result.push_back(solution.x[delta_start]);
+  result.push_back(solution.x[a_start]);
+
+  for(size_t i = 0; i < N; i++) {
+    result.push_back(solution.x[x_start + 1 + i]);
+    result.push_back(solution.x[y_start + 1 + i]);
+  }
+
+  return result;
 }

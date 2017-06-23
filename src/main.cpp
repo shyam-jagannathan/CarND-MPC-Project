@@ -105,15 +105,24 @@ int main() {
           double Lf = 2.67;
 
           //predict state in 100ms
-          double latency = 0.1;
-          px = px + v * cos(psi) * latency;
-          py = py + v * sin(psi) * latency;
-          psi = psi - v * delta/Lf * latency;
-          v = v + acc * latency;
+          double latency_in_sec = 0.1;
+          
+          //Only if you have a latency predict ahead
+          if(latency_in_sec > 0.0) {
+            px = px + v * cos(psi) * latency_in_sec;
+            py = py + v * sin(psi) * latency_in_sec;
+            //Make sure psi at t+1 is psi at t "minus" the update
+            psi = psi - v * delta/Lf * latency_in_sec;
+            v = v + acc * latency_in_sec;
+          }
 
+          //Vectors having waypoints adjusted to local car co-ordinate system
           Eigen::VectorXd ptsx_v(ptsx.size());
           Eigen::VectorXd ptsy_v(ptsy.size());
 
+          //Convert from global co-ordinates to local
+          //Adjust for translation first, followed by rotation
+          //Notice that rotation equations are adjusted for -psi
           for(size_t i = 0; i < ptsx.size(); i++) {
             ptsx_v[i] = (ptsx[i] - px) * cos(psi) + (ptsy[i] - py) * sin(psi);
             ptsy_v[i] = (ptsy[i] - py) * cos(psi) - (ptsx[i] - px) * sin(psi);
@@ -122,6 +131,7 @@ int main() {
           // Fit a polynomial to the above x and y coordinates
           auto coeffs = polyfit(ptsx_v, ptsy_v, 3);
 
+          //As car's position and orientation is adjusted to local co-ordinates, px, py and psi must be zero here
           double cte = polyeval(coeffs, 0);
           double epsi = -atan(coeffs[1]);
 
@@ -130,8 +140,11 @@ int main() {
 
           auto vars = mpc.Solve(state, coeffs);
 
-          steer_value = -1 * vars[6] / (deg2rad(25) * Lf);
-          throttle_value = vars[7];
+          //Correct the steering values in radians with a max angle of 25deg 
+          //The first two values returned is steering angle and acceleration
+          //Normalize by Lf here as delta lower/upper bounds are scaled by Lf
+          steer_value = -1 * vars[0] / (deg2rad(25) * Lf);
+          throttle_value = vars[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -146,8 +159,12 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
-          mpc_x_vals = {-20, -15, -10, -5, 0, 5, 10, 15, 20};
-          mpc_y_vals = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+          //Display the predicted location 6 time steps ahead
+          size_t N = 6;
+          for(size_t i = 0; i < N; i++) {
+            mpc_x_vals.push_back(vars[2 + (i*2)]); //even indexes has x location
+            mpc_y_vals.push_back(vars[2 + (i*2) + 1]); //odd indexes has y location
+          }
 
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
@@ -156,8 +173,7 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-
-          for(size_t i = 0; i < ptsx_v.size(); i++) {
+          for(int i = 0; i < ptsx_v.size(); i++) {
             next_x_vals.push_back(ptsx_v[i]);
             next_y_vals.push_back(ptsy_v[i]);
           } 
